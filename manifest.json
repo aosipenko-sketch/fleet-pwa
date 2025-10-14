@@ -2,7 +2,7 @@
   "name": "Ottawa Fleet Manager",
   "short_name": "Fleet Manager",
   "description": "Manage your Ottawa fleet vehicles",
-  "start_url": "/",
+  "start_url": "/fleet-pwa/index.html"
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
