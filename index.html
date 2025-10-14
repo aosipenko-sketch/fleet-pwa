@@ -11,13 +11,11 @@
     
     <title>Ottawa Fleet Manager</title>
     
-    <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
-    
-    <!-- iOS Icons -->
     <link rel="apple-touch-icon" href="icon-192.png">
     
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     
     <style>
         @media (max-width: 640px) {
@@ -32,9 +30,36 @@
     </style>
 </head>
 <body class="bg-gray-50">
-    <div id="app" class="min-h-screen p-4 sm:p-6"></div>
+    <!-- Login Screen -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-900 mb-2">Ottawa Fleet Manager</h1>
+                <p class="text-gray-600">Sign in to manage your fleet</p>
+            </div>
+            
+            <div id="google-signin-button" class="flex justify-center"></div>
+            
+            <div class="mt-6 text-center text-sm text-gray-500">
+                <p>Secure sign-in with Google</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App (hidden until logged in) -->
+    <div id="main-app" class="hidden">
+        <!-- User Info Bar -->
+        <div class="bg-blue-600 text-white px-4 py-2 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <img id="user-avatar" src="" alt="User" class="w-8 h-8 rounded-full">
+                <span id="user-name" class="text-sm font-medium"></span>
+            </div>
+            <button onclick="signOut()" class="text-sm hover:underline">Sign Out</button>
+        </div>
+        
+        <div id="app" class="min-h-screen p-4 sm:p-6"></div>
+    </div>
     
-    <!-- Install prompt for PWA -->
     <div id="install-prompt" class="hidden fixed bottom-4 left-4 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50">
         <div class="flex items-center justify-between">
             <div>
@@ -49,7 +74,6 @@
     </div>
 
     <script>
-        // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('service-worker.js')
@@ -58,7 +82,6 @@
             });
         }
         
-        // PWA Install Prompt
         let deferredPrompt;
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
@@ -82,6 +105,79 @@
 
     <script type="module">
         const API_URL = 'https://fleet-backend-qy07.onrender.com';
+        const GOOGLE_CLIENT_ID = '866212465425-476kan1i34k20t2ij971u38800qcqj6n.apps.googleusercontent.com';
+        
+        let currentUser = null;
+
+        // Initialize Google Sign-In
+        function initGoogleSignIn() {
+            google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleCredentialResponse
+            });
+            
+            google.accounts.id.renderButton(
+                document.getElementById('google-signin-button'),
+                { 
+                    theme: 'outline', 
+                    size: 'large',
+                    width: 300,
+                    text: 'signin_with'
+                }
+            );
+            
+            // Check if already signed in
+            const savedUser = localStorage.getItem('fleetUser');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                showMainApp();
+            }
+        }
+
+        function handleCredentialResponse(response) {
+            const credential = response.credential;
+            const payload = parseJwt(credential);
+            
+            currentUser = {
+                name: payload.name,
+                email: payload.email,
+                picture: payload.picture,
+                token: credential
+            };
+            
+            localStorage.setItem('fleetUser', JSON.stringify(currentUser));
+            showMainApp();
+        }
+
+        function parseJwt(token) {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            return JSON.parse(jsonPayload);
+        }
+
+        function showMainApp() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+            
+            document.getElementById('user-name').textContent = currentUser.name;
+            document.getElementById('user-avatar').src = currentUser.picture;
+            
+            // Initialize fleet manager
+            window.fleetManager = new FleetManager();
+        }
+
+        window.signOut = function() {
+            google.accounts.id.disableAutoSelect();
+            localStorage.removeItem('fleetUser');
+            currentUser = null;
+            location.reload();
+        }
+
+        // Initialize on load
+        window.addEventListener('load', initGoogleSignIn);
 
         class FleetManager {
             constructor() {
@@ -205,14 +301,13 @@
                     return;
                 }
                 
-                // Render main UI
                 app.innerHTML = `
                     <div class="max-w-7xl mx-auto">
                         <div class="bg-white rounded-lg shadow-sm border border-gray-200">
                             <div class="p-4 sm:p-6 border-b border-gray-200">
                                 <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                                     <div>
-                                        <h1 class="text-xl sm:text-2xl font-bold text-gray-900">Ottawa Fleet Manager</h1>
+                                        <h1 class="text-xl sm:text-2xl font-bold text-gray-900">Fleet Manager</h1>
                                         <p class="text-xs sm:text-sm text-gray-500 mt-1">Synced with Google Sheets</p>
                                     </div>
                                     <div class="flex gap-2 w-full sm:w-auto">
@@ -355,10 +450,6 @@
                 this.saveRow(rowId, values);
             }
         }
-
-        // Initialize the app
-        const fleetManager = new FleetManager();
-        window.fleetManager = fleetManager;
     </script>
 </body>
 </html>
