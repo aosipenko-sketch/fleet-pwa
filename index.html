@@ -107,6 +107,14 @@
         const API_URL = 'https://fleet-backend-qy07.onrender.com';
         const GOOGLE_CLIENT_ID = '866212465425-476kan1i34k20t2ij971u38800qcqj6n.apps.googleusercontent.com';
         
+        // AUTHORIZED USERS - Add email addresses here
+        const AUTHORIZED_EMAILS = [
+            'aosipenko@verdunwindows.com',
+            'jseguin@verdunwindows.com',
+            'rjacks@nordik.com'
+            // Add more emails as needed
+        ];
+        
         let currentUser = null;
 
         // Initialize Google Sign-In
@@ -130,13 +138,27 @@
             const savedUser = localStorage.getItem('fleetUser');
             if (savedUser) {
                 currentUser = JSON.parse(savedUser);
-                showMainApp();
+                // Verify saved user is still authorized
+                if (AUTHORIZED_EMAILS.includes(currentUser.email.toLowerCase())) {
+                    showMainApp();
+                } else {
+                    // User no longer authorized, clear saved data
+                    localStorage.removeItem('fleetUser');
+                    alert('Your access has been revoked. Please contact an administrator.');
+                }
             }
         }
 
         function handleCredentialResponse(response) {
             const credential = response.credential;
             const payload = parseJwt(credential);
+            
+            // Check if email is authorized
+            if (!AUTHORIZED_EMAILS.includes(payload.email.toLowerCase())) {
+                alert(`Access denied. Your email (${payload.email}) is not authorized to access this application.`);
+                google.accounts.id.disableAutoSelect();
+                return;
+            }
             
             currentUser = {
                 name: payload.name,
