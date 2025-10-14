@@ -4,33 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#2563eb">
-    <meta name="description" content="Ottawa Fleet Management System">
+    <meta name="description" content="Multi-Company Fleet Management System">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Fleet Manager">
     
-    <title>Ottawa Fleet Manager</title>
+    <title>Fleet Manager</title>
     
-    <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    
-    <!-- Leaflet CSS for Maps -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- Leaflet JS for Maps -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <style>
-        @media (max-width: 640px) {
-            .responsive-table {
-                font-size: 0.75rem;
-            }
-            .responsive-table th,
-            .responsive-table td {
-                padding: 0.5rem 0.25rem;
-            }
+        .list-row:hover {
+            background-color: #f3f4f6;
         }
     </style>
 </head>
@@ -39,7 +28,7 @@
     <div id="login-screen" class="min-h-screen flex items-center justify-center p-4">
         <div class="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
             <div class="text-center mb-8">
-                <h1 class="text-3xl font-bold text-gray-900 mb-2">Ottawa Fleet Manager</h1>
+                <h1 class="text-3xl font-bold text-gray-900 mb-2">Fleet Manager</h1>
                 <p class="text-gray-600">Sign in to manage your fleet</p>
             </div>
             
@@ -51,76 +40,46 @@
         </div>
     </div>
 
-    <!-- Main App (hidden until logged in) -->
+    <!-- Main App -->
     <div id="main-app" class="hidden">
         <!-- User Info Bar -->
         <div class="bg-blue-600 text-white px-4 py-2 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <img id="user-avatar" src="" alt="User" class="w-8 h-8 rounded-full">
-                <span id="user-name" class="text-sm font-medium"></span>
+                <div>
+                    <span id="user-name" class="text-sm font-medium block"></span>
+                    <span id="current-company" class="text-xs opacity-90"></span>
+                </div>
             </div>
             <button onclick="signOut()" class="text-sm hover:underline">Sign Out</button>
         </div>
         
         <div id="app" class="min-h-screen p-4 sm:p-6"></div>
     </div>
-    
-    <div id="install-prompt" class="hidden fixed bottom-4 left-4 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="font-semibold">Install Fleet Manager</p>
-                <p class="text-sm">Add to home screen for quick access</p>
-            </div>
-            <div class="flex gap-2">
-                <button id="install-button" class="bg-white text-blue-600 px-4 py-2 rounded font-medium">Install</button>
-                <button id="dismiss-button" class="text-white px-4 py-2">✕</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('service-worker.js')
-                    .then(reg => console.log('Service Worker registered'))
-                    .catch(err => console.log('Service Worker registration failed:', err));
-            });
-        }
-        
-        let deferredPrompt;
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            document.getElementById('install-prompt').classList.remove('hidden');
-        });
-        
-        document.getElementById('install-button')?.addEventListener('click', async () => {
-            if (deferredPrompt) {
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                deferredPrompt = null;
-                document.getElementById('install-prompt').classList.add('hidden');
-            }
-        });
-        
-        document.getElementById('dismiss-button')?.addEventListener('click', () => {
-            document.getElementById('install-prompt').classList.add('hidden');
-        });
-    </script>
 
     <script type="module">
         const API_URL = 'https://fleet-backend-qy07.onrender.com';
         const GOOGLE_CLIENT_ID = '866212465425-476kan1i34k20t2ij971u38800qcqj6n.apps.googleusercontent.com';
         
-        // AUTHORIZED USERS - Only these emails can access the app
+        // AUTHORIZED USERS
         const AUTHORIZED_EMAILS = [
             'aosipenko@verdunwindows.com',
             'jseguin@verdunwindows.com',
-            'rjacks@nordik.com'
+            'rjacks@nordik.com',
+            'pbechard@verdunwindows.com',
+            'pbechard@nordik.com'
         ];
         
+        const COMPANIES = {
+            verdun: { name: 'Verdun', color: 'blue' },
+            nwi: { name: 'NWI', color: 'green' },
+            nwgta: { name: 'NWGTA', color: 'purple' },
+            lipton: { name: 'Lipton', color: 'orange' }
+        };
+        
         let currentUser = null;
-        let vehicleLocations = {}; // Cache for Geotab locations
+        let currentCompany = null;
+        let vehicleLocations = {};
 
         // Initialize Google Sign-In
         function initGoogleSignIn() {
@@ -143,11 +102,9 @@
             const savedUser = localStorage.getItem('fleetUser');
             if (savedUser) {
                 currentUser = JSON.parse(savedUser);
-                // Verify saved user is still authorized
                 if (AUTHORIZED_EMAILS.includes(currentUser.email.toLowerCase())) {
                     showMainApp();
                 } else {
-                    // User no longer authorized, clear saved data
                     localStorage.removeItem('fleetUser');
                     alert('Your access has been revoked. Please contact an administrator.');
                 }
@@ -158,7 +115,6 @@
             const credential = response.credential;
             const payload = parseJwt(credential);
             
-            // Check if email is authorized
             if (!AUTHORIZED_EMAILS.includes(payload.email.toLowerCase())) {
                 alert(`Access denied. Your email (${payload.email}) is not authorized to access this application.`);
                 google.accounts.id.disableAutoSelect();
@@ -192,37 +148,80 @@
             document.getElementById('user-name').textContent = currentUser.name;
             document.getElementById('user-avatar').src = currentUser.picture;
             
-            // Initialize fleet manager
-            window.fleetManager = new FleetManager();
+            showCompanySelector();
+        }
+
+        function showCompanySelector() {
+            currentCompany = null;
+            document.getElementById('current-company').textContent = '';
+            
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="max-w-6xl mx-auto">
+                    <div class="text-center mb-12">
+                        <h1 class="text-4xl font-bold text-gray-900 mb-3">Select Company</h1>
+                        <p class="text-gray-600">Choose which company's fleet you want to manage</p>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        ${Object.entries(COMPANIES).map(([key, company]) => `
+                            <button 
+                                onclick="selectCompany('${key}')"
+                                class="bg-white rounded-2xl shadow-lg border-2 border-${company.color}-200 hover:border-${company.color}-400 p-8 transition-all hover:scale-105 hover:shadow-xl"
+                            >
+                                <div class="w-20 h-20 mx-auto mb-4 bg-${company.color}-100 rounded-full flex items-center justify-center">
+                                    <svg class="w-10 h-10 text-${company.color}-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                                    </svg>
+                                </div>
+                                <h2 class="text-2xl font-bold text-gray-900 mb-2">${company.name}</h2>
+                                <p class="text-sm text-gray-600">View Fleet</p>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        window.selectCompany = function(companyKey) {
+            currentCompany = companyKey;
+            document.getElementById('current-company').textContent = COMPANIES[companyKey].name;
+            window.fleetManager = new FleetManager(companyKey);
         }
 
         window.signOut = function() {
             google.accounts.id.disableAutoSelect();
             localStorage.removeItem('fleetUser');
             currentUser = null;
+            currentCompany = null;
             location.reload();
         }
 
-        // Initialize on load
         window.addEventListener('load', initGoogleSignIn);
 
         class FleetManager {
-            constructor() {
+            constructor(company) {
+                this.company = company;
                 this.data = [];
                 this.headers = [];
-                this.editingRow = null;
-                this.editValues = {};
                 this.isAdding = false;
                 this.newRow = {};
-                this.searchQuery = '';
+                this.searchCriteria = {
+                    driver: '',
+                    unit: '',
+                    make: '',
+                    model: '',
+                    year: ''
+                };
                 this.filteredData = [];
-                this.editingField = null; // Track which field is being edited
+                this.editingField = null;
+                this.viewMode = 'search'; // 'search', 'list', 'cards', 'map'
                 this.init();
             }
 
             async init() {
                 await this.loadData();
-                this.render('search'); // Show search screen after loading
+                this.render('search');
             }
 
             async loadData() {
@@ -231,7 +230,7 @@
                         this.render('loading');
                     }
                     
-                    const response = await fetch(`${API_URL}/api/read`);
+                    const response = await fetch(`${API_URL}/api/${this.company}/read`);
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     
                     const result = await response.json();
@@ -244,27 +243,20 @@
                         }));
                     }
                     
-                    // Load Geotab locations for all vehicles
                     await this.loadGeotabLocations();
                     
-                    // Re-apply search filter if active
-                    if (this.searchQuery) {
-                        this.filteredData = this.data.filter(row => {
-                            return row.values.some(value => 
-                                value && value.toString().toLowerCase().includes(this.searchQuery)
-                            );
-                        });
-                    }
-                    
-                    // Re-render current view
-                    if (this.searchQuery || this.filteredData.length > 0) {
-                        this.render('data');
-                        this.initVehicleMaps();
-                    } else if (this.data.length > 0 && !this.isAdding) {
+                    if (this.viewMode === 'list' || this.viewMode === 'cards') {
+                        this.render(this.viewMode);
+                        if (this.viewMode === 'cards') {
+                            this.initVehicleMaps();
+                        }
+                    } else if (this.viewMode === 'search') {
                         this.render('search');
                     } else if (this.isAdding) {
-                        this.render('data');
-                        this.initVehicleMaps();
+                        this.render(this.viewMode);
+                        if (this.viewMode === 'cards') {
+                            this.initVehicleMaps();
+                        }
                     }
                 } catch (err) {
                     this.render('error', err.message);
@@ -273,7 +265,6 @@
 
             async loadGeotabLocations() {
                 try {
-                    // Load location for each vehicle with a VIN
                     const vinIndex = this.getVINColumnIndex();
                     if (vinIndex === -1) return;
                     
@@ -298,10 +289,15 @@
             }
 
             getVINColumnIndex() {
-                // Find VIN column - look for common names
                 const vinNames = ['vin', 'vehicle identification number', 'v.i.n'];
                 return this.headers.findIndex(h => 
                     vinNames.includes(h.toLowerCase())
+                );
+            }
+
+            getColumnIndex(columnName) {
+                return this.headers.findIndex(h => 
+                    h.toLowerCase().includes(columnName.toLowerCase())
                 );
             }
 
@@ -311,9 +307,8 @@
             }
 
             initVehicleMaps() {
-                // Initialize mini-maps for each vehicle card
                 setTimeout(() => {
-                    (this.searchQuery ? this.filteredData : this.data).forEach(row => {
+                    this.filteredData.forEach(row => {
                         const vin = this.getVehicleVIN(row);
                         if (vin && vehicleLocations[vin]) {
                             const mapElement = document.getElementById(`map-${row.id}`);
@@ -348,6 +343,7 @@
             }
 
             async showLiveMap() {
+                this.viewMode = 'map';
                 this.render('map');
             }
 
@@ -360,11 +356,10 @@
                 const mapElement = document.getElementById('live-map');
                 if (!mapElement) return;
                 
-                // Initialize map centered on first vehicle or default location
                 const firstLocation = Object.values(vehicleLocations)[0];
                 const center = firstLocation 
                     ? [firstLocation.latitude, firstLocation.longitude]
-                    : [45.4215, -75.6972]; // Ottawa default
+                    : [45.4215, -75.6972];
                 
                 const map = L.map('live-map').setView(center, 12);
                 
@@ -372,7 +367,6 @@
                     attribution: '© OpenStreetMap contributors'
                 }).addTo(map);
                 
-                // Add markers for all tracked vehicles
                 const vinIndex = this.getVINColumnIndex();
                 if (vinIndex === -1) return;
                 
@@ -406,70 +400,101 @@
                     }
                 });
                 
-                // Fit map to show all vehicles
                 if (bounds.length > 0) {
                     map.fitBounds(bounds, { padding: [50, 50] });
                 }
             }
 
             performSearch() {
-                const input = document.getElementById('search-input');
-                if (!input) return;
+                // Get search values
+                this.searchCriteria.driver = document.getElementById('search-driver')?.value.trim().toLowerCase() || '';
+                this.searchCriteria.unit = document.getElementById('search-unit')?.value.trim().toLowerCase() || '';
+                this.searchCriteria.make = document.getElementById('search-make')?.value.trim().toLowerCase() || '';
+                this.searchCriteria.model = document.getElementById('search-model')?.value.trim().toLowerCase() || '';
+                this.searchCriteria.year = document.getElementById('search-year')?.value.trim().toLowerCase() || '';
                 
-                this.searchQuery = input.value.trim().toLowerCase();
+                // Check if at least one criteria is filled
+                const hasSearchCriteria = Object.values(this.searchCriteria).some(val => val !== '');
                 
-                if (!this.searchQuery) {
-                    alert('Please enter a search term');
+                if (!hasSearchCriteria) {
+                    alert('Please enter at least one search criteria');
                     return;
                 }
                 
-                // Search across all columns
+                // Find column indices
+                const driverIdx = this.getColumnIndex('driver');
+                const unitIdx = this.getColumnIndex('unit');
+                const makeIdx = this.getColumnIndex('make');
+                const modelIdx = this.getColumnIndex('model');
+                const yearIdx = this.getColumnIndex('year');
+                
+                // Filter data based on all criteria
                 this.filteredData = this.data.filter(row => {
-                    return row.values.some(value => 
-                        value && value.toString().toLowerCase().includes(this.searchQuery)
-                    );
+                    let matches = true;
+                    
+                    if (this.searchCriteria.driver && driverIdx !== -1) {
+                        const value = (row.values[driverIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.driver);
+                    }
+                    
+                    if (this.searchCriteria.unit && unitIdx !== -1) {
+                        const value = (row.values[unitIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.unit);
+                    }
+                    
+                    if (this.searchCriteria.make && makeIdx !== -1) {
+                        const value = (row.values[makeIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.make);
+                    }
+                    
+                    if (this.searchCriteria.model && modelIdx !== -1) {
+                        const value = (row.values[modelIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.model);
+                    }
+                    
+                    if (this.searchCriteria.year && yearIdx !== -1) {
+                        const value = (row.values[yearIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.year);
+                    }
+                    
+                    return matches;
                 });
                 
-                this.render('data');
+                this.viewMode = 'cards';
+                this.render('cards');
             }
 
             showAll() {
-                this.searchQuery = '';
                 this.filteredData = [];
-                this.render('data');
+                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '' };
+                this.viewMode = 'list';
+                this.render('list');
             }
 
-            backToSearch() {
-                this.searchQuery = '';
+            clearSearch() {
+                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '' };
                 this.filteredData = [];
-                this.isAdding = false;
-                this.editingRow = null;
+                this.viewMode = 'search';
                 this.render('search');
             }
 
-            async saveRow(rowIndex, values) {
-                try {
-                    const response = await fetch(`${API_URL}/api/update`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rowIndex, values })
-                    });
-                    
-                    if (!response.ok) throw new Error('Failed to save');
-                    
-                    this.editingRow = null;
-                    this.editValues = {};
-                    await this.loadData();
-                } catch (err) {
-                    alert('Failed to save: ' + err.message);
-                }
+            backToSearch() {
+                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '' };
+                this.filteredData = [];
+                this.isAdding = false;
+                this.viewMode = 'search';
+                this.render('search');
+            }
+
+            backToCompanySelector() {
+                showCompanySelector();
             }
 
             async addRow() {
                 try {
                     const values = this.headers.map(h => this.newRow[h] || '');
                     
-                    const response = await fetch(`${API_URL}/api/add`, {
+                    const response = await fetch(`${API_URL}/api/${this.company}/add`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ values })
@@ -480,25 +505,10 @@
                     this.isAdding = false;
                     this.newRow = {};
                     await this.loadData();
-                    this.render('data');
-                    this.initVehicleMaps();
+                    this.viewMode = 'list';
+                    this.render('list');
                 } catch (err) {
                     alert('Failed to add: ' + err.message);
-                }
-            }
-
-            async deleteRow(rowIndex) {
-                if (!confirm('Are you sure you want to delete this vehicle?')) return;
-                
-                try {
-                    const response = await fetch(`${API_URL}/api/delete/${rowIndex}`, {
-                        method: 'DELETE'
-                    });
-                    
-                    if (!response.ok) throw new Error('Failed to delete');
-                    await this.loadData();
-                } catch (err) {
-                    alert('Failed to delete: ' + err.message);
                 }
             }
 
@@ -511,7 +521,6 @@
                             <div class="text-center">
                                 <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
                                 <p class="text-gray-600 font-medium">Loading fleet data...</p>
-                                <p class="text-sm text-gray-500 mt-2">First load may take 50+ seconds</p>
                             </div>
                         </div>
                     `;
@@ -538,88 +547,128 @@
                     return;
                 }
                 
-                // Search Screen
                 if (state === 'search') {
                     app.innerHTML = `
-                        <div class="max-w-4xl mx-auto">
-                            <!-- Header -->
+                        <div class="max-w-5xl mx-auto">
+                            <div class="mb-4">
+                                <button 
+                                    onclick="fleetManager.backToCompanySelector()"
+                                    class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+                                >
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                                    </svg>
+                                    Back to Company Selection
+                                </button>
+                            </div>
+                            
                             <div class="text-center mb-8">
                                 <div class="inline-block p-4 bg-blue-50 rounded-full mb-4">
                                     <svg class="w-12 h-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                     </svg>
                                 </div>
-                                <h1 class="text-3xl font-bold text-gray-900 mb-2">Fleet Vehicle Search</h1>
-                                <p class="text-gray-600">Search by any vehicle attribute to get started</p>
+                                <h1 class="text-3xl font-bold text-gray-900 mb-2">${COMPANIES[this.company].name} Fleet</h1>
+                                <p class="text-gray-600">Search by specific criteria or view all vehicles</p>
                             </div>
 
-                            <!-- Search Box -->
                             <div class="bg-white rounded-2xl shadow-xl border border-gray-200 p-8">
-                                <div class="relative mb-6">
-                                    <input 
-                                        type="text" 
-                                        id="search-input"
-                                        placeholder="Search by driver, unit #, department, make, model, plate, or ownership..."
-                                        class="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
-                                        onkeyup="if(event.key === 'Enter') fleetManager.performSearch()"
-                                    >
+                                <h2 class="text-xl font-semibold text-gray-900 mb-6">Advanced Search</h2>
+                                
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Driver Name</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-driver"
+                                            placeholder="e.g., John Smith"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Unit #</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-unit"
+                                            placeholder="e.g., 1234"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Make</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-make"
+                                            placeholder="e.g., Ford"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Model</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-model"
+                                            placeholder="e.g., F-150"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Year</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-year"
+                                            placeholder="e.g., 2023"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-3 mb-6">
                                     <button 
                                         onclick="fleetManager.performSearch()"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
-                                    >
-                                        Search
-                                    </button>
-                                </div>
-
-                                <!-- Search Tips -->
-                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                                        <div class="font-semibold text-gray-700 mb-1">Driver Name</div>
-                                        <div class="text-gray-500 text-xs">e.g., John Smith</div>
-                                    </div>
-                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                                        <div class="font-semibold text-gray-700 mb-1">Unit Number</div>
-                                        <div class="text-gray-500 text-xs">e.g., 1234</div>
-                                    </div>
-                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                                        <div class="font-semibold text-gray-700 mb-1">Department</div>
-                                        <div class="text-gray-500 text-xs">e.g., Sales</div>
-                                    </div>
-                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
-                                        <div class="font-semibold text-gray-700 mb-1">Make/Model</div>
-                                        <div class="text-gray-500 text-xs">e.g., Ford</div>
-                                    </div>
-                                </div>
-
-                                <!-- Quick Actions -->
-                                <div class="mt-6 pt-6 border-t border-gray-200 flex flex-col gap-3">
-                                    <button 
-                                        onclick="fleetManager.showLiveMap()"
-                                        class="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg hover:from-green-600 hover:to-emerald-700 font-medium transition-all shadow-md flex items-center justify-center gap-2"
+                                        class="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center justify-center gap-2"
                                     >
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                         </svg>
-                                        Live Fleet Map
+                                        Search
                                     </button>
-                                    <div class="flex gap-3">
+                                    <button 
+                                        onclick="fleetManager.clearSearch()"
+                                        class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+
+                                <div class="pt-6 border-t border-gray-200">
+                                    <p class="text-sm text-gray-600 mb-4 text-center">OR</p>
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <button 
+                                            onclick="fleetManager.showLiveMap()"
+                                            class="px-4 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg hover:from-green-600 hover:to-emerald-700 font-medium transition-all shadow-md flex items-center justify-center gap-2"
+                                        >
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
+                                            </svg>
+                                            Live Map
+                                        </button>
                                         <button 
                                             onclick="fleetManager.showAll()"
-                                            class="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
+                                            class="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
                                         >
                                             View All Vehicles
                                         </button>
                                         <button 
                                             onclick="fleetManager.startAdding()"
-                                            class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                                            class="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
                                         >
-                                            + Add New Vehicle
+                                            + Add Vehicle
                                         </button>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Stats -->
                             <div class="mt-8 grid grid-cols-3 gap-4">
                                 <div class="bg-white rounded-xl shadow-md p-4 text-center border border-gray-100">
                                     <div class="text-3xl font-bold text-blue-600">${this.data.length}</div>
@@ -636,13 +685,9 @@
                             </div>
                         </div>
                     `;
-                    
-                    // Focus search input after render
-                    setTimeout(() => document.getElementById('search-input')?.focus(), 100);
                     return;
                 }
                 
-                // Live Map View
                 if (state === 'map') {
                     app.innerHTML = `
                         <div class="max-w-7xl mx-auto">
@@ -659,7 +704,7 @@
                                         </button>
                                         <div>
                                             <h1 class="text-xl sm:text-2xl font-bold text-gray-900">Live Fleet Map</h1>
-                                            <p class="text-sm text-gray-600">Real-time vehicle tracking</p>
+                                            <p class="text-sm text-gray-600">${COMPANIES[this.company].name}</p>
                                         </div>
                                     </div>
                                     <button 
@@ -679,83 +724,152 @@
                         </div>
                     `;
                     
-                    // Initialize map after render
                     setTimeout(() => this.initLiveMap(), 100);
                     return;
                 }
                 
-                // Results View
-                app.innerHTML = `
-                    <div class="max-w-7xl mx-auto">
-                        <!-- Header with Back Button -->
-                        <div class="bg-white rounded-xl shadow-md border border-gray-200 p-4 sm:p-6 mb-6">
-                            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                                <div class="flex items-center gap-4">
-                                    <button 
-                                        onclick="fleetManager.backToSearch()"
-                                        class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                                    >
-                                        <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
-                                        </svg>
-                                    </button>
-                                    <div>
-                                        <h1 class="text-xl sm:text-2xl font-bold text-gray-900">
-                                            ${this.searchQuery ? 'Search Results' : 'All Vehicles'}
-                                        </h1>
-                                        <p class="text-sm text-gray-600 mt-1">
-                                            ${this.searchQuery ? `Found ${this.filteredData.length} vehicles matching "${this.searchQuery}"` : `Showing all ${this.data.length} vehicles`}
-                                        </p>
+                // List View
+                if (state === 'list') {
+                    const displayData = this.data; // Always show all in list view
+                    
+                    app.innerHTML = `
+                        <div class="max-w-7xl mx-auto">
+                            <div class="bg-white rounded-xl shadow-md border border-gray-200 p-4 sm:p-6 mb-6">
+                                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                    <div class="flex items-center gap-4">
+                                        <button 
+                                            onclick="fleetManager.backToSearch()"
+                                            class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                        >
+                                            <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                                            </svg>
+                                        </button>
+                                        <div>
+                                            <h1 class="text-xl sm:text-2xl font-bold text-gray-900">All Vehicles</h1>
+                                            <p class="text-sm text-gray-600 mt-1">
+                                                ${COMPANIES[this.company].name} - ${displayData.length} vehicles
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button onclick="fleetManager.loadData()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors">
+                                            Refresh
+                                        </button>
+                                        <button onclick="fleetManager.startAdding()" class="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors">
+                                            + Add
+                                        </button>
                                     </div>
                                 </div>
-                                <div class="flex gap-2 w-full sm:w-auto">
-                                    <button onclick="fleetManager.loadData()" class="flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex-1 sm:flex-none font-medium transition-colors">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                        </svg>
+                            </div>
+
+                            ${this.isAdding ? this.renderAddCard() : ''}
+
+                            <div class="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+                                <div class="overflow-x-auto">
+                                    <table class="w-full">
+                                        <thead class="bg-gray-50 border-b border-gray-200">
+                                            <tr>
+                                                ${this.headers.map(h => `
+                                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider whitespace-nowrap">
+                                                        ${h}
+                                                    </th>
+                                                `).join('')}
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-200">
+                                            ${displayData.map(row => this.renderTableRow(row)).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Card View (Search Results)
+                if (state === 'cards') {
+                    app.innerHTML = `
+                        <div class="max-w-7xl mx-auto">
+                            <div class="bg-white rounded-xl shadow-md border border-gray-200 p-4 sm:p-6 mb-6">
+                                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                    <div class="flex items-center gap-4">
+                                        <button 
+                                            onclick="fleetManager.backToSearch()"
+                                            class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                        >
+                                            <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                                            </svg>
+                                        </button>
+                                        <div>
+                                            <h1 class="text-xl sm:text-2xl font-bold text-gray-900">Search Results</h1>
+                                            <p class="text-sm text-gray-600 mt-1">
+                                                ${COMPANIES[this.company].name} - Found ${this.filteredData.length} vehicles
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button onclick="fleetManager.loadData()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors">
                                         Refresh
                                     </button>
-                                    <button onclick="fleetManager.startAdding()" class="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex-1 sm:flex-none font-medium transition-colors">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                ${this.filteredData.map(row => this.renderVehicleCard(row)).join('')}
+                            </div>
+
+                            ${this.filteredData.length === 0 ? `
+                                <div class="bg-white rounded-xl shadow-md p-12 text-center border border-gray-200">
+                                    <div class="inline-block p-4 bg-gray-100 rounded-full mb-4">
+                                        <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                         </svg>
-                                        Add Vehicle
-                                    </button>
+                                    </div>
+                                    <h3 class="text-xl font-semibold text-gray-900 mb-2">No vehicles found</h3>
+                                    <p class="text-gray-600">Try adjusting your search criteria</p>
                                 </div>
-                            </div>
+                            ` : ''}
                         </div>
+                    `;
+                    
+                    this.initVehicleMaps();
+                }
+            }
 
-                        <!-- Vehicle Cards -->
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            ${this.isAdding ? this.renderAddCard() : ''}
-                            ${(this.searchQuery ? this.filteredData : this.data).map(row => this.renderVehicleCard(row)).join('')}
-                        </div>
-
-                        ${(this.searchQuery ? this.filteredData : this.data).length === 0 && !this.isAdding ? `
-                            <div class="bg-white rounded-xl shadow-md p-12 text-center border border-gray-200">
-                                <div class="inline-block p-4 bg-gray-100 rounded-full mb-4">
-                                    <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                </div>
-                                <h3 class="text-xl font-semibold text-gray-900 mb-2">No vehicles found</h3>
-                                <p class="text-gray-600">Try a different search term or add a new vehicle</p>
-                            </div>
-                        ` : ''}
-                    </div>
+            renderTableRow(row) {
+                return `
+                    <tr class="list-row cursor-pointer" onclick="fleetManager.viewVehicleDetails(${row.id})">
+                        ${row.values.map((value, idx) => `
+                            <td class="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">
+                                ${this.renderEditableField(row, idx, false, true)}
+                            </td>
+                        `).join('')}
+                    </tr>
                 `;
+            }
+
+            viewVehicleDetails(rowId) {
+                const row = this.data.find(r => r.id === rowId);
+                if (!row) return;
+                
+                // Filter to show only this vehicle in card view
+                this.filteredData = [row];
+                this.viewMode = 'cards';
+                this.render('cards');
             }
 
             renderAddCard() {
                 return `
-                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-md border-2 border-blue-200 p-6">
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-md border-2 border-blue-200 p-6 mb-4">
                         <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                             <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                             </svg>
                             New Vehicle
                         </h3>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                             ${this.headers.map((h, i) => `
                                 <div>
                                     <label class="block text-xs font-medium text-gray-700 mb-1">${h}</label>
@@ -808,15 +922,6 @@
                                     <p class="text-sm text-gray-500">${this.headers[0]}</p>
                                 </div>
                             </div>
-                            <button 
-                                onclick="fleetManager.deleteRow(${row.id})" 
-                                class="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors flex-shrink-0"
-                                title="Delete Vehicle"
-                            >
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                </svg>
-                            </button>
                         </div>
                         
                         ${hasTracking ? `
@@ -847,12 +952,16 @@
                 `;
             }
 
-            renderEditableField(row, fieldIndex, isTitle = false) {
+            renderEditableField(row, fieldIndex, isTitle = false, isTableCell = false) {
                 const fieldKey = `${row.id}-${fieldIndex}`;
                 const isEditing = this.editingField === fieldKey;
                 const value = row.values[fieldIndex] || '';
                 
-                if (isEditing) {
+                if (isTableCell && !isEditing) {
+                    return value || '-';
+                }
+                
+                if (isEditing && !isTableCell) {
                     const inputId = `edit-input-${fieldKey}`;
                     setTimeout(() => {
                         const input = document.getElementById(inputId);
@@ -907,12 +1016,12 @@
 
             startFieldEdit(rowId, fieldIndex) {
                 this.editingField = `${rowId}-${fieldIndex}`;
-                this.render('data');
+                this.render(this.viewMode);
             }
 
             cancelFieldEdit() {
                 this.editingField = null;
-                this.render('data');
+                this.render(this.viewMode);
             }
 
             async saveFieldEdit(rowId, fieldIndex, newValue) {
@@ -921,21 +1030,20 @@
                 const row = this.data.find(r => r.id === rowId);
                 if (!row) return;
                 
-                // Check if value actually changed
                 if (row.values[fieldIndex] === newValue) {
                     this.editingField = null;
-                    this.render('data');
-                    this.initVehicleMaps();
+                    this.render(this.viewMode);
+                    if (this.viewMode === 'cards') {
+                        this.initVehicleMaps();
+                    }
                     return;
                 }
                 
-                // Update the value
                 const updatedValues = [...row.values];
                 updatedValues[fieldIndex] = newValue;
                 
-                // Save to backend
                 try {
-                    const response = await fetch(`${API_URL}/api/update`, {
+                    const response = await fetch(`${API_URL}/api/${this.company}/update`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rowIndex: rowId, values: updatedValues })
@@ -946,48 +1054,34 @@
                     this.editingField = null;
                     await this.loadData();
                     
-                    // Re-render and show success briefly
-                    this.render('data');
-                    this.initVehicleMaps();
+                    this.render(this.viewMode);
+                    if (this.viewMode === 'cards') {
+                        this.initVehicleMaps();
+                    }
                 } catch (err) {
                     alert('Failed to save changes: ' + err.message);
                     this.editingField = null;
-                    this.render('data');
-                    this.initVehicleMaps();
+                    this.render(this.viewMode);
+                    if (this.viewMode === 'cards') {
+                        this.initVehicleMaps();
+                    }
                 }
             }
 
             startAdding() {
                 this.isAdding = true;
                 this.newRow = {};
-                this.searchQuery = '';
-                this.render('data');
+                this.render(this.viewMode);
             }
 
             cancelAdd() {
                 this.isAdding = false;
                 this.newRow = {};
-                this.render('data');
+                this.render(this.viewMode);
             }
 
             updateNewRow(header, value) {
                 this.newRow[header] = value;
-            }
-
-            startEdit(rowId) {
-                // Removed - using inline editing now
-            }
-
-            cancelEdit() {
-                // Removed - using inline editing now
-            }
-
-            updateEditValue(header, value) {
-                // Removed - using inline editing now
-            }
-
-            saveEdit(rowId) {
-                // Removed - using inline editing now
             }
         }
     </script>
