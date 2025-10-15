@@ -45,7 +45,7 @@
         <!-- User Info Bar -->
         <div class="bg-blue-600 text-white px-4 py-2 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <img id="user-avatar" src="" alt="User" class="w-8 h-8 rounded-full">
+                <img id="user-avatar" src="" alt="User" class="w-8 h-8 rounded-full cursor-pointer hover:ring-2 hover:ring-white transition-all" onclick="handleProfileClick()">
                 <div>
                     <span id="user-name" class="text-sm font-medium block"></span>
                     <span id="current-company" class="text-xs opacity-90"></span>
@@ -61,14 +61,9 @@
         const API_URL = 'https://fleet-backend-qy07.onrender.com';
         const GOOGLE_CLIENT_ID = '866212465425-476kan1i34k20t2ij971u38800qcqj6n.apps.googleusercontent.com';
         
-        // AUTHORIZED USERS
-        const AUTHORIZED_EMAILS = [
-            'aosipenko@verdunwindows.com',
-            'jseguin@verdunwindows.com',
-            'rjacks@nordik.com',
-            'pbechard@verdunwindows.com',
-            'pbechard@nordik.com'
-        ];
+        // AUTHORIZED USERS - Will be loaded from backend
+        const ADMIN_EMAIL = 'aosipenko@verdunwindows.com';
+        let AUTHORIZED_EMAILS = [];
         
         const COMPANIES = {
             verdun: { name: 'Verdun', color: 'blue' },
@@ -81,8 +76,30 @@
         let currentCompany = null;
         let vehicleLocations = {};
 
+        // Load authorized users from backend
+        async function loadAuthorizedUsers() {
+            try {
+                const response = await fetch(`${API_URL}/api/admin/users`);
+                const data = await response.json();
+                if (data.success) {
+                    AUTHORIZED_EMAILS = data.users;
+                    // Always include admin
+                    if (!AUTHORIZED_EMAILS.includes(ADMIN_EMAIL)) {
+                        AUTHORIZED_EMAILS.push(ADMIN_EMAIL);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load users:', error);
+                // Fallback to admin only
+                AUTHORIZED_EMAILS = [ADMIN_EMAIL];
+            }
+        }
+
         // Initialize Google Sign-In
-        function initGoogleSignIn() {
+        async function initGoogleSignIn() {
+            // Load authorized users first
+            await loadAuthorizedUsers();
+            
             google.accounts.id.initialize({
                 client_id: GOOGLE_CLIENT_ID,
                 callback: handleCredentialResponse
@@ -183,6 +200,204 @@
             `;
         }
 
+        window.handleProfileClick = function() {
+            // Only admin can access admin panel
+            if (currentUser && currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+                showAdminPanel();
+            }
+        }
+
+        async function showAdminPanel() {
+            const app = document.getElementById('app');
+            
+            // Load current users
+            app.innerHTML = `
+                <div class="max-w-4xl mx-auto">
+                    <div class="mb-6">
+                        <button 
+                            onclick="${currentCompany ? 'fleetManager.backToSearch()' : 'showCompanySelector()'}"
+                            class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+                        >
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                            </svg>
+                            Back
+                        </button>
+                    </div>
+                    
+                    <div class="bg-white rounded-2xl shadow-xl border border-gray-200 p-8">
+                        <div class="flex items-center gap-3 mb-6">
+                            <div class="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                                <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-gray-900">User Management</h1>
+                                <p class="text-sm text-gray-600">Manage authorized users</p>
+                            </div>
+                        </div>
+
+                        <!-- Add User Form -->
+                        <div class="bg-blue-50 rounded-xl p-6 mb-6">
+                            <h2 class="text-lg font-semibold text-gray-900 mb-4">Add New User</h2>
+                            <div class="flex gap-3">
+                                <input 
+                                    type="email" 
+                                    id="new-user-email"
+                                    placeholder="Enter email address"
+                                    class="flex-1 px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                >
+                                <button 
+                                    onclick="addUser()"
+                                    class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center gap-2"
+                                >
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                    Add User
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Users List -->
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900 mb-4">Authorized Users</h2>
+                            <div id="users-list" class="space-y-2">
+                                <div class="text-center py-8">
+                                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                    <p class="text-gray-600 mt-2">Loading users...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Load and display users
+            await refreshUsersList();
+        }
+
+        window.refreshUsersList = async function() {
+            try {
+                await loadAuthorizedUsers();
+                
+                const usersList = document.getElementById('users-list');
+                if (!usersList) return;
+                
+                if (AUTHORIZED_EMAILS.length === 0) {
+                    usersList.innerHTML = `
+                        <div class="text-center py-8 text-gray-500">
+                            No users found
+                        </div>
+                    `;
+                    return;
+                }
+                
+                usersList.innerHTML = AUTHORIZED_EMAILS.map(email => {
+                    const isAdmin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+                    return `
+                        <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="font-medium text-gray-900">${email}</div>
+                                    ${isAdmin ? '<span class="text-xs text-purple-600 font-semibold">ADMIN</span>' : ''}
+                                </div>
+                            </div>
+                            ${!isAdmin ? `
+                                <button 
+                                    onclick="deleteUser('${email}')"
+                                    class="px-3 py-1.5 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 font-medium transition-colors text-sm"
+                                >
+                                    Remove
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Failed to load users:', error);
+                const usersList = document.getElementById('users-list');
+                if (usersList) {
+                    usersList.innerHTML = `
+                        <div class="text-center py-8 text-red-600">
+                            Failed to load users
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        window.addUser = async function() {
+            const emailInput = document.getElementById('new-user-email');
+            const email = emailInput?.value.trim();
+            
+            if (!email) {
+                alert('Please enter an email address');
+                return;
+            }
+            
+            if (!email.includes('@')) {
+                alert('Please enter a valid email address');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/api/admin/users`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        email,
+                        adminEmail: currentUser.email
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    emailInput.value = '';
+                    await refreshUsersList();
+                    alert('User added successfully!');
+                } else {
+                    alert(data.error || 'Failed to add user');
+                }
+            } catch (error) {
+                console.error('Error adding user:', error);
+                alert('Failed to add user. Please try again.');
+            }
+        }
+
+        window.deleteUser = async function(email) {
+            if (!confirm(`Are you sure you want to remove ${email}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/api/admin/users/${encodeURIComponent(email)}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminEmail: currentUser.email })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    await refreshUsersList();
+                    alert('User removed successfully!');
+                } else {
+                    alert(data.error || 'Failed to remove user');
+                }
+            } catch (error) {
+                console.error('Error removing user:', error);
+                alert('Failed to remove user. Please try again.');
+            }
+        }
+
         window.selectCompany = function(companyKey) {
             currentCompany = companyKey;
             document.getElementById('current-company').textContent = COMPANIES[companyKey].name;
@@ -211,7 +426,9 @@
                     unit: '',
                     make: '',
                     model: '',
-                    year: ''
+                    year: '',
+                    vin: '',
+                    plate: ''
                 };
                 this.filteredData = [];
                 this.editingField = null;
@@ -412,6 +629,8 @@
                 this.searchCriteria.make = document.getElementById('search-make')?.value.trim().toLowerCase() || '';
                 this.searchCriteria.model = document.getElementById('search-model')?.value.trim().toLowerCase() || '';
                 this.searchCriteria.year = document.getElementById('search-year')?.value.trim().toLowerCase() || '';
+                this.searchCriteria.vin = document.getElementById('search-vin')?.value.trim().toLowerCase() || '';
+                this.searchCriteria.plate = document.getElementById('search-plate')?.value.trim().toLowerCase() || '';
                 
                 // Check if at least one criteria is filled
                 const hasSearchCriteria = Object.values(this.searchCriteria).some(val => val !== '');
@@ -427,6 +646,8 @@
                 const makeIdx = this.getColumnIndex('make');
                 const modelIdx = this.getColumnIndex('model');
                 const yearIdx = this.getColumnIndex('year');
+                const vinIdx = this.getVINColumnIndex();
+                const plateIdx = this.getColumnIndex('plate');
                 
                 // Filter data based on all criteria
                 this.filteredData = this.data.filter(row => {
@@ -457,6 +678,16 @@
                         matches = matches && value.includes(this.searchCriteria.year);
                     }
                     
+                    if (this.searchCriteria.vin && vinIdx !== -1) {
+                        const value = (row.values[vinIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.vin);
+                    }
+                    
+                    if (this.searchCriteria.plate && plateIdx !== -1) {
+                        const value = (row.values[plateIdx] || '').toString().toLowerCase();
+                        matches = matches && value.includes(this.searchCriteria.plate);
+                    }
+                    
                     return matches;
                 });
                 
@@ -466,20 +697,20 @@
 
             showAll() {
                 this.filteredData = [];
-                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '' };
+                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '', vin: '', plate: '' };
                 this.viewMode = 'list';
                 this.render('list');
             }
 
             clearSearch() {
-                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '' };
+                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '', vin: '', plate: '' };
                 this.filteredData = [];
                 this.viewMode = 'search';
                 this.render('search');
             }
 
             backToSearch() {
-                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '' };
+                this.searchCriteria = { driver: '', unit: '', make: '', model: '', year: '', vin: '', plate: '' };
                 this.filteredData = [];
                 this.isAdding = false;
                 this.viewMode = 'search';
@@ -618,6 +849,24 @@
                                             type="text" 
                                             id="search-year"
                                             placeholder="e.g., 2023"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">VIN #</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-vin"
+                                            placeholder="e.g., 1HGBH41JXMN109186"
+                                            class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                        >
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Plate #</label>
+                                        <input 
+                                            type="text" 
+                                            id="search-plate"
+                                            placeholder="e.g., ABC 1234"
                                             class="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
                                         >
                                     </div>
@@ -1030,7 +1279,28 @@
                 const row = this.data.find(r => r.id === rowId);
                 if (!row) return;
                 
-                if (row.values[fieldIndex] === newValue) {
+                const oldValue = row.values[fieldIndex] || '';
+                
+                // Check if value actually changed
+                if (oldValue === newValue) {
+                    this.editingField = null;
+                    this.render(this.viewMode);
+                    if (this.viewMode === 'cards') {
+                        this.initVehicleMaps();
+                    }
+                    return;
+                }
+                
+                // Ask for confirmation
+                const fieldName = this.headers[fieldIndex];
+                const confirmed = confirm(
+                    `Confirm change?\n\n` +
+                    `Field: ${fieldName}\n` +
+                    `Old value: "${oldValue}"\n` +
+                    `New value: "${newValue}"`
+                );
+                
+                if (!confirmed) {
                     this.editingField = null;
                     this.render(this.viewMode);
                     if (this.viewMode === 'cards') {
