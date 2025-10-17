@@ -506,7 +506,19 @@
                     console.error('Error loading Geotab locations:', err);
                 }
             }
-
+            async loadDropdownOptions() {
+    try {
+        const response = await fetch(`${API_URL}/api/${this.company}/dropdown-options`);
+        if (!response.ok) throw new Error('Failed to load dropdown options');
+        
+        const data = await response.json();
+        this.dropdownOptions = data.options || {};
+        console.log('Loaded dropdown options:', this.dropdownOptions);
+    } catch (err) {
+        console.error('Error loading dropdown options:', err);
+        this.dropdownOptions = {};
+    }
+}
             getVINColumnIndex() {
                 const vinNames = ['vin', 'vehicle identification number', 'v.i.n'];
                 return this.headers.findIndex(h => 
@@ -730,7 +742,10 @@
                     const response = await fetch(`${API_URL}/api/${this.company}/add`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ values })
+                        body: JSON.stringify({ 
+    values,
+    userEmail: currentUser.email
+})
                     });
                     
                     if (!response.ok) throw new Error('Failed to add');
@@ -1381,7 +1396,12 @@
                     const response = await fetch(`${API_URL}/api/${this.company}/update`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rowIndex: rowId, values: updatedValues })
+                        body: JSON.stringify({ 
+    rowIndex: rowId, 
+    values: updatedValues,
+    userEmail: currentUser.email,
+    oldValues: row.values
+})
                     });
                     
                     if (!response.ok) throw new Error('Failed to save');
